@@ -1,3 +1,4 @@
-chmod +x sorc.py
-
-sudo mv sorc.py /usr/local/bin/sorc
+```bash
+chmod +x install.sh
+./instal.sh
+```

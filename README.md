@@ -1,5 +1,3 @@
-Markdown
-
 # sorc - Linux Screen Orchestrator 🖥️
 
 ![Language](https://img.shields.io/badge/Language-Python%20%7C%20Shell-blue)
@@ -22,10 +20,10 @@ Simply run the following command in your terminal:
 
 ```bash
 curl -fsSL [https://raw.githubusercontent.com/TheDynomike/sorc/main/install.sh](https://raw.githubusercontent.com/TheDynomike/sorc/main/install.sh) | bash
+```
+Note: Depending on your system permissions, the installation script may prompt you for sudo access to place the executable in your system's PATH (e.g., /usr/local/bin).
 
-    Note: Depending on your system permissions, the installation script may prompt you for sudo access to place the executable in your system's PATH (e.g., /usr/local/bin).
-
-🛠️ Prerequisites
+## 🛠️ Prerequisites
 
 Before installing sorc, ensure your system has the following installed:
 
@@ -37,13 +35,13 @@ Before installing sorc, ensure your system has the following installed:
 
     curl (for the installation script)
 
-💻 Usage
+## 💻 Usage
 
 (Note: Update this section with specific commands once you expand your script's CLI flags!)
 
 Once installed, you can use the sorc command directly from your terminal.
 Bash
-
+```
 # Example command structure 
 sorc [options] <command>
 
@@ -54,8 +52,8 @@ Common operations:
     List active orchestrated screens: sorc list
 
     Stop an orchestrated screen: sorc stop <name>
-
-🤝 Contributing
+```
+## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
 
@@ -69,7 +67,7 @@ Contributions, issues, and feature requests are welcome!
 
     Open a Pull Request
 
-📝 License
+## 📝 License
 
 Distributed under the MIT License. See LICENSE for more information.
 

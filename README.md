@@ -1,4 +1,3 @@
 ```bash
-chmod +x install.sh
-./instal.sh
+curl -fsSL https://raw.githubusercontent.com/TheDynomike/sorc/main/install.sh | bash
 ```

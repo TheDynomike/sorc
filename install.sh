@@ -1,128 +1,117 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# sorc install script
-# Installs sorc + all required/optional deps
+# sorc — Screen Orchestrator
+# Install / Update script
+# https://github.com/TheDynomike/sorc
 # ─────────────────────────────────────────────
 set -euo pipefail
 
+REPO_OWNER="TheDynomike"
+REPO_NAME="sorc"
+REPO_BRANCH="main"
+REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
+RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
+API_BASE="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
+
 INSTALL_BIN="/usr/local/bin/sorc"
 SORC_DIR="$HOME/.sorc"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SORC_PY="$SCRIPT_DIR/sorc.py"
 LOG_FILE="/tmp/sorc-install-$(date +%Y%m%dT%H%M%S).log"
+
 INSTALLED=()
 FAILED=()
 WARNED=()
+IS_UPDATE=0
 
 # ── colors ──
 RED='\033[0;91m'; GREEN='\033[0;92m'; YELLOW='\033[0;93m'
 BLUE='\033[0;94m'; CYAN='\033[0;96m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 
 # ── logging helpers ──
-_log()  { echo "[$(date '+%H:%M:%S')] $*" >> "$LOG_FILE"; }
-info()  { echo -e "  ${BLUE}→${RESET} $1";                   _log "INFO  $1"; }
-ok()    { echo -e "  ${GREEN}✓${RESET} $1";                   _log "OK    $1"; }
-warn()  { echo -e "  ${YELLOW}!${RESET} $1"; WARNED+=("$1");  _log "WARN  $1"; }
-fail()  { echo -e "  ${RED}✗${RESET} $1"; FAILED+=("$1");     _log "FAIL  $1"; }
-die()   { echo -e "\n  ${RED}${BOLD}✗ Fatal:${RESET} $1\n" >&2; _log "FATAL $1"
-          echo -e "  ${DIM}Full log: $LOG_FILE${RESET}\n" >&2; exit 1; }
-step()  { echo -e "\n${BOLD}$1${RESET}\n$(printf '─%.0s' {1..46})"; _log "STEP  $1"; }
-detail(){ echo -e "  ${DIM}  $1${RESET}"; _log "      $1"; }
+_log()   { echo "[$(date '+%H:%M:%S')] $*" >> "$LOG_FILE"; }
+info()   { echo -e "  ${BLUE}→${RESET} $1";                    _log "INFO  $1"; }
+ok()     { echo -e "  ${GREEN}✓${RESET} $1";                    _log "OK    $1"; }
+warn()   { echo -e "  ${YELLOW}!${RESET} $1"; WARNED+=("$1");   _log "WARN  $1"; }
+fail()   { echo -e "  ${RED}✗${RESET} $1";   FAILED+=("$1");    _log "FAIL  $1"; }
+detail() { echo -e "  ${DIM}  $1${RESET}";                      _log "      $1"; }
+step()   { echo -e "\n${BOLD}$1${RESET}\n$(printf '─%.0s' {1..46})"; _log "STEP  $1"; }
+die()    {
+  echo -e "\n  ${RED}${BOLD}✗ Fatal:${RESET} $1\n" >&2
+  _log "FATAL $1"
+  echo -e "  ${DIM}Full log: $LOG_FILE${RESET}\n" >&2
+  exit 1
+}
 
 # ── package manager detection ──
 detect_pm() {
-  if command -v apt-get &>/dev/null;  then echo "apt"
-  elif command -v dnf &>/dev/null;    then echo "dnf"
-  elif command -v yum &>/dev/null;    then echo "yum"
-  elif command -v pacman &>/dev/null; then echo "pacman"
-  elif command -v zypper &>/dev/null; then echo "zypper"
-  elif command -v brew &>/dev/null;   then echo "brew"
+  if   command -v apt-get &>/dev/null; then echo "apt"
+  elif command -v dnf     &>/dev/null; then echo "dnf"
+  elif command -v yum     &>/dev/null; then echo "yum"
+  elif command -v pacman  &>/dev/null; then echo "pacman"
+  elif command -v zypper  &>/dev/null; then echo "zypper"
+  elif command -v brew    &>/dev/null; then echo "brew"
   else echo "unknown"
   fi
 }
 
 PM=$(detect_pm)
 
-install_cmd() {
-  local pkg="$1"
+install_hint() {
   case "$PM" in
-    apt)    echo "sudo apt-get install -y $pkg" ;;
-    dnf)    echo "sudo dnf install -y $pkg" ;;
-    yum)    echo "sudo yum install -y $pkg" ;;
-    pacman) echo "sudo pacman -S --noconfirm $pkg" ;;
-    zypper) echo "sudo zypper install -y $pkg" ;;
-    brew)   echo "brew install $pkg" ;;
-    *)      echo "# install $pkg manually" ;;
+    apt)    echo "sudo apt-get install -y $1" ;;
+    dnf)    echo "sudo dnf install -y $1" ;;
+    yum)    echo "sudo yum install -y $1" ;;
+    pacman) echo "sudo pacman -S --noconfirm $1" ;;
+    zypper) echo "sudo zypper install -y $1" ;;
+    brew)   echo "brew install $1" ;;
+    *)      echo "install $1 manually for your distro" ;;
   esac
 }
 
-# Try to install a package; returns 0 on success, 1 on failure
 try_install() {
-  local pkg="$1"
-  local label="${2:-$pkg}"
+  local pkg="$1" label="${2:-$1}"
   info "Installing $label..."
-  detail "Package manager: $PM"
-
-  local cmd
+  detail "Package manager: $PM  |  package: $pkg"
+  local ok_flag=0
   case "$PM" in
-    apt)
-      detail "Running: sudo apt-get install -y $pkg"
-      if sudo apt-get install -y "$pkg" >> "$LOG_FILE" 2>&1; then return 0; fi ;;
-    dnf)
-      detail "Running: sudo dnf install -y $pkg"
-      if sudo dnf install -y "$pkg" >> "$LOG_FILE" 2>&1; then return 0; fi ;;
-    yum)
-      detail "Running: sudo yum install -y $pkg"
-      if sudo yum install -y "$pkg" >> "$LOG_FILE" 2>&1; then return 0; fi ;;
-    pacman)
-      detail "Running: sudo pacman -S --noconfirm $pkg"
-      if sudo pacman -S --noconfirm "$pkg" >> "$LOG_FILE" 2>&1; then return 0; fi ;;
-    zypper)
-      detail "Running: sudo zypper install -y $pkg"
-      if sudo zypper install -y "$pkg" >> "$LOG_FILE" 2>&1; then return 0; fi ;;
-    brew)
-      detail "Running: brew install $pkg"
-      if brew install "$pkg" >> "$LOG_FILE" 2>&1; then return 0; fi ;;
-    *)
-      detail "Unknown package manager — cannot auto-install" ;;
+    apt)    sudo apt-get install -y "$pkg"       >> "$LOG_FILE" 2>&1 && ok_flag=1 ;;
+    dnf)    sudo dnf install -y "$pkg"           >> "$LOG_FILE" 2>&1 && ok_flag=1 ;;
+    yum)    sudo yum install -y "$pkg"           >> "$LOG_FILE" 2>&1 && ok_flag=1 ;;
+    pacman) sudo pacman -S --noconfirm "$pkg"    >> "$LOG_FILE" 2>&1 && ok_flag=1 ;;
+    zypper) sudo zypper install -y "$pkg"        >> "$LOG_FILE" 2>&1 && ok_flag=1 ;;
+    brew)   brew install "$pkg"                  >> "$LOG_FILE" 2>&1 && ok_flag=1 ;;
+    *)      detail "Unknown package manager — skipping auto-install" ;;
   esac
-  return 1
+  return $((1 - ok_flag))
 }
 
-# Ensure a dep is present; hard=1 means fatal if missing & can't install
 ensure_dep() {
-  local bin="$1"
-  local pkg="${2:-$1}"
-  local label="${3:-$bin}"
-  local hard="${4:-0}"
+  local bin="$1" pkg="${2:-$1}" label="${3:-$1}" hard="${4:-0}"
 
   if command -v "$bin" &>/dev/null; then
-    local ver
-    ver=$("$bin" --version 2>&1 | head -1 || true)
+    local ver; ver=$("$bin" --version 2>&1 | head -1 || true)
     ok "$label — $ver"
     return 0
   fi
 
   warn "$label not found"
 
-  if [ "$PM" = "unknown" ]; then
-    local msg="Could not auto-install $label. $(install_cmd "$pkg")"
-    if [ "$hard" = "1" ]; then die "$msg"; else warn "$msg"; fi
-    return 1
-  fi
-
   if [ "$hard" = "1" ]; then
-    # Required — attempt install, die on failure
+    if [ "$PM" = "unknown" ]; then
+      die "$label is required.\n  Install manually: $(install_hint "$pkg")"
+    fi
     if try_install "$pkg" "$label"; then
       INSTALLED+=("$label")
-      ok "$label installed"
+      ok "$label installed successfully"
     else
-      die "Failed to install $label. Check log: $LOG_FILE\n  Manual: $(install_cmd "$pkg")"
+      die "Failed to install $label.\n  Manual: $(install_hint "$pkg")\n  Log: $LOG_FILE"
     fi
   else
-    # Optional — attempt install, warn on failure
+    if [ "$PM" = "unknown" ]; then
+      warn "Cannot auto-install. Manual: $(install_hint "$pkg")"
+      return 1
+    fi
     echo -ne "  ${CYAN}?${RESET} Auto-install $label? [Y/n] "
-    read -r answer </dev/tty
+    read -r answer </dev/tty || answer="y"
     if [[ "$answer" =~ ^[Nn] ]]; then
       warn "Skipped $label — some sorc features may not work"
       return 1
@@ -131,177 +120,265 @@ ensure_dep() {
       INSTALLED+=("$label")
       ok "$label installed"
     else
-      fail "Failed to auto-install $label"
-      warn "Manual install: $(install_cmd "$pkg")"
+      fail "Could not auto-install $label"
+      warn "Manual: $(install_hint "$pkg")"
+      return 1
     fi
   fi
+}
+
+# ─────────────────────────────────────────────
+# GITHUB HELPERS
+# ─────────────────────────────────────────────
+
+# Fetch a URL with curl or wget, output to stdout
+http_get() {
+  local url="$1"
+  if command -v curl &>/dev/null; then
+    curl -fsSL "$url"
+  elif command -v wget &>/dev/null; then
+    wget -qO- "$url"
+  else
+    die "curl or wget is required to download sorc. Install one and retry."
+  fi
+}
+
+# Get the latest commit SHA on REPO_BRANCH via GitHub API
+get_remote_sha() {
+  http_get "${API_BASE}/commits/${REPO_BRANCH}" 2>>"$LOG_FILE" \
+    | grep '"sha"' | head -1 \
+    | sed 's/.*"sha": *"\([^"]*\)".*/\1/'
+}
+
+# Read locally cached SHA (written after each install/update)
+get_local_sha() {
+  local sha_file="$SORC_DIR/.installed_sha"
+  [ -f "$sha_file" ] && cat "$sha_file" || echo ""
+}
+
+save_local_sha() {
+  echo "$1" > "$SORC_DIR/.installed_sha"
 }
 
 # ─────────────────────────────────────────────
 # BEGIN
 # ─────────────────────────────────────────────
 
-echo -e "\n${BOLD}sorc — Screen Orchestrator  ${DIM}install script${RESET}"
+echo -e "\n${BOLD}sorc — Screen Orchestrator${RESET}  ${DIM}install/update${RESET}"
 echo    "──────────────────────────────────────────────"
-echo -e "  ${DIM}Log: $LOG_FILE${RESET}"
-_log "Install started. PM=$PM OS=$(uname -sr)"
+echo -e "  ${DIM}Repo:  $REPO_URL${RESET}"
+echo -e "  ${DIM}Log:   $LOG_FILE${RESET}"
+_log "Started. PM=$PM  OS=$(uname -sr)  USER=$(whoami)"
 
 # ─────────────────────────────────────────────
 step "1/5  Preflight"
 # ─────────────────────────────────────────────
 
-# Must be Linux
-if [[ "$(uname)" != "Linux" ]]; then
-  die "sorc requires Linux (systemd). Detected: $(uname)"
-fi
+[[ "$(uname)" != "Linux" ]] && die "sorc requires Linux + systemd. Detected: $(uname)"
 ok "Linux $(uname -r)"
 
-# sorc.py must exist
-if [ ! -f "$SORC_PY" ]; then
-  die "sorc.py not found at $SORC_PY\n  Run install.sh from the same directory as sorc.py"
-fi
-ok "sorc.py found at $SORC_PY"
+command -v systemctl &>/dev/null || die "systemd not found. sorc is systemd-only."
+ok "systemd — $(systemctl --version | head -1)"
 
-# Not running as root (should use sudo selectively)
-if [ "$EUID" -eq 0 ]; then
-  warn "Running as root — sorc pods will run as root. Consider a dedicated user."
-fi
+[ "$EUID" -eq 0 ] && warn "Running as root — pods will run as root. A dedicated user is safer."
 
-# sudo available
-if ! command -v sudo &>/dev/null; then
-  die "sudo is required to install system deps and write to /usr/local/bin"
-fi
+command -v sudo &>/dev/null || die "sudo is required."
 ok "sudo available"
 
+# curl or wget needed for download
+if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+  ensure_dep curl curl "curl" 1
+fi
+ok "HTTP client — $(command -v curl &>/dev/null && echo curl || echo wget)"
+
 # ─────────────────────────────────────────────
-step "2/5  Required dependencies"
+step "2/5  Check for updates"
 # ─────────────────────────────────────────────
 
-# python3 — hard required
+LOCAL_SHA=$(get_local_sha)
+REMOTE_SHA=""
+
+info "Fetching latest commit SHA from GitHub..."
+if REMOTE_SHA=$(get_remote_sha) && [ -n "$REMOTE_SHA" ]; then
+  detail "Remote SHA: ${REMOTE_SHA:0:12}"
+  detail "Local  SHA: ${LOCAL_SHA:0:12}${LOCAL_SHA:+""}"
+else
+  warn "Could not reach GitHub API — proceeding with local install if sorc.py is present"
+  REMOTE_SHA=""
+fi
+
+# Determine mode
+if [ -z "$LOCAL_SHA" ] && ! command -v sorc &>/dev/null; then
+  info "No existing installation found — fresh install"
+  IS_UPDATE=0
+elif [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
+  ok "Already up to date (${REMOTE_SHA:0:12})"
+  echo -e "\n  ${GREEN}${BOLD}sorc is current. Nothing to do.${RESET}"
+  echo -e "  Run ${BLUE}sorc doctor${RESET} to verify your environment.\n"
+  exit 0
+elif [ -n "$LOCAL_SHA" ] || command -v sorc &>/dev/null; then
+  CURRENT_VER=$(sorc --version 2>/dev/null || echo "unknown")
+  info "Update available — current: $CURRENT_VER  remote: ${REMOTE_SHA:0:12}"
+  IS_UPDATE=1
+else
+  info "Installing sorc for the first time"
+  IS_UPDATE=0
+fi
+
+# ─────────────────────────────────────────────
+step "3/5  Required dependencies"
+# ─────────────────────────────────────────────
+
 ensure_dep python3 python3 "Python 3" 1
 
-# Python version check
 PY_VER=$(python3 -c 'import sys; print(sys.version_info.major * 10 + sys.version_info.minor)')
 if [ "$PY_VER" -lt 38 ]; then
-  die "Python 3.8+ required. Found: $(python3 --version)\n  Upgrade Python and re-run."
+  die "Python 3.8+ required. Found: $(python3 --version)"
 fi
-detail "Version OK (3.8+ required)"
+detail "Python version OK (≥3.8)"
 
-# systemd — hard required
-if ! command -v systemctl &>/dev/null; then
-  die "systemd is required. sorc manages agents via systemd units.\n  sorc does not support non-systemd Linux."
-fi
-SYSTEMD_VER=$(systemctl --version | head -1)
-ok "systemd — $SYSTEMD_VER"
-
-# journalctl — hard required (part of systemd, but verify)
 ensure_dep journalctl systemd "journalctl" 1
-
-# git — hard required (pod source management)
 ensure_dep git git "git" 1
 
 # ─────────────────────────────────────────────
-step "3/5  Optional dependencies"
+step "4/5  Optional dependencies"
 # ─────────────────────────────────────────────
 
 echo -e "  ${DIM}sorc needs screen or tmux (or both) for terminal sessions.${RESET}\n"
 
 HAS_SCREEN=0; HAS_TMUX=0
+command -v screen &>/dev/null && { ok "screen — $(screen --version 2>&1 | head -1)"; HAS_SCREEN=1; } \
+  || { ensure_dep screen screen "GNU screen" 0 && HAS_SCREEN=1 || true; }
 
-if command -v screen &>/dev/null; then
-  ok "screen — $(screen --version 2>&1 | head -1)"
-  HAS_SCREEN=1
-else
-  if ensure_dep screen screen "GNU screen" 0; then HAS_SCREEN=1; fi
-fi
+command -v tmux &>/dev/null && { ok "tmux — $(tmux -V)"; HAS_TMUX=1; } \
+  || { ensure_dep tmux tmux "tmux" 0 && HAS_TMUX=1 || true; }
 
-if command -v tmux &>/dev/null; then
-  ok "tmux — $(tmux -V)"
-  HAS_TMUX=1
-else
-  if ensure_dep tmux tmux "tmux" 0; then HAS_TMUX=1; fi
-fi
+[ "$HAS_SCREEN" -eq 0 ] && [ "$HAS_TMUX" -eq 0 ] && \
+  die "sorc requires screen or tmux. Neither installed.\n  $(install_hint screen)\n  $(install_hint tmux)"
 
-if [ "$HAS_SCREEN" -eq 0 ] && [ "$HAS_TMUX" -eq 0 ]; then
-  die "sorc requires screen or tmux. Neither could be installed.\n  $(install_cmd screen)\n  $(install_cmd tmux)"
-fi
-
-# ss (iproute2) — for sorc doctor port scanning
-if ! command -v ss &>/dev/null; then
-  info "ss (iproute2) not found — used by sorc doctor for port conflict detection"
-  ensure_dep ss iproute2 "iproute2/ss" 0 || warn "sorc doctor port checks will be skipped"
-else
-  ok "ss (iproute2) — available"
-fi
+command -v ss &>/dev/null \
+  && ok "ss (iproute2) — available" \
+  || { ensure_dep ss iproute2 "iproute2/ss" 0 || warn "sorc doctor port-scan checks will be skipped"; }
 
 # ─────────────────────────────────────────────
-step "4/5  Installing sorc"
+step "5/5  Download & install sorc"
 # ─────────────────────────────────────────────
 
-chmod +x "$SORC_PY"
-detail "Set executable: $SORC_PY"
+SORC_PY_URL="${RAW_BASE}/sorc.py"
+TMP_PY=$(mktemp /tmp/sorc-XXXXXX.py)
+trap 'rm -f "$TMP_PY"' EXIT
 
-if sudo cp "$SORC_PY" "$INSTALL_BIN" 2>>"$LOG_FILE" && sudo chmod +x "$INSTALL_BIN"; then
+# Download sorc.py (prefer GitHub, fall back to local copy in same dir)
+if [ -n "$REMOTE_SHA" ]; then
+  info "Downloading sorc.py from GitHub (${REMOTE_SHA:0:12})..."
+  detail "URL: $SORC_PY_URL"
+  if http_get "$SORC_PY_URL" > "$TMP_PY" 2>>"$LOG_FILE"; then
+    ok "Downloaded sorc.py ($(wc -c < "$TMP_PY") bytes)"
+  else
+    warn "GitHub download failed — falling back to local sorc.py"
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    [ -f "$SCRIPT_DIR/sorc.py" ] || die "No local sorc.py found and GitHub download failed."
+    cp "$SCRIPT_DIR/sorc.py" "$TMP_PY"
+    ok "Using local sorc.py"
+    REMOTE_SHA=""  # don't cache SHA if we didn't download from GitHub
+  fi
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "$SCRIPT_DIR/sorc.py" ]; then
+    info "Using local sorc.py (GitHub unreachable)"
+    cp "$SCRIPT_DIR/sorc.py" "$TMP_PY"
+  else
+    die "Cannot reach GitHub and no local sorc.py found."
+  fi
+fi
+
+# Verify it's valid Python before touching the live install
+info "Verifying downloaded file..."
+if python3 -m py_compile "$TMP_PY" 2>>"$LOG_FILE"; then
+  ok "Python syntax valid"
+else
+  die "Downloaded sorc.py failed syntax check — aborting to protect existing install.\n  Log: $LOG_FILE"
+fi
+
+# Backup existing install if updating
+if [ "$IS_UPDATE" = "1" ] && [ -f "$INSTALL_BIN" ]; then
+  BACKUP="${INSTALL_BIN}.bak"
+  sudo cp "$INSTALL_BIN" "$BACKUP" 2>>"$LOG_FILE" || true
+  detail "Backup saved → $BACKUP"
+fi
+
+# Install
+chmod +x "$TMP_PY"
+if sudo cp "$TMP_PY" "$INSTALL_BIN" 2>>"$LOG_FILE" && sudo chmod +x "$INSTALL_BIN"; then
   ok "Installed → $INSTALL_BIN"
   detail "$(ls -lh "$INSTALL_BIN")"
 else
-  warn "sudo install to $INSTALL_BIN failed — falling back to user-local"
+  warn "sudo install to $INSTALL_BIN failed — falling back to ~/.local/bin"
   LOCAL_BIN="$HOME/.local/bin"
   mkdir -p "$LOCAL_BIN"
-  cp "$SORC_PY" "$LOCAL_BIN/sorc"
+  cp "$TMP_PY" "$LOCAL_BIN/sorc"
   chmod +x "$LOCAL_BIN/sorc"
   INSTALL_BIN="$LOCAL_BIN/sorc"
   ok "Installed → $INSTALL_BIN"
-
   if ! echo "$PATH" | grep -q "$LOCAL_BIN"; then
     warn "$LOCAL_BIN is not on your \$PATH"
     detail "Add to ~/.bashrc or ~/.zshrc:"
     echo   "         export PATH=\"\$HOME/.local/bin:\$PATH\""
-    WARNED+=("~/.local/bin not on PATH")
+    WARNED+=("~/.local/bin not on PATH — sorc may not be found in new shells")
   fi
 fi
 
 # Init ~/.sorc dirs
-info "Initialising ~/.sorc directories..."
+info "Initialising ~/.sorc..."
 mkdir -p "$SORC_DIR"/{pods,logs,snapshots,templates}
-detail "Created: pods/ logs/ snapshots/ templates/"
+detail "pods/ logs/ snapshots/ templates/ ready"
 ok "~/.sorc ready"
+
+# Cache the installed SHA
+if [ -n "$REMOTE_SHA" ]; then
+  save_local_sha "$REMOTE_SHA"
+  detail "Cached SHA: ${REMOTE_SHA:0:12} → $SORC_DIR/.installed_sha"
+fi
 
 # Smoke test
 info "Running smoke test..."
 if SMOKE=$("$INSTALL_BIN" --version 2>&1); then
   ok "Smoke test passed — $SMOKE"
 else
-  die "Binary installed but failed to run.\n  Try: python3 $INSTALL_BIN --version\n  Log: $LOG_FILE"
+  # If we have a backup, roll back
+  if [ "$IS_UPDATE" = "1" ] && [ -f "${INSTALL_BIN}.bak" ]; then
+    warn "Smoke test failed — rolling back to previous version"
+    sudo cp "${INSTALL_BIN}.bak" "$INSTALL_BIN" 2>/dev/null || cp "${INSTALL_BIN}.bak" "$INSTALL_BIN"
+    die "Update rolled back. Previous version restored.\n  Log: $LOG_FILE"
+  fi
+  die "Installed binary failed smoke test.\n  Try: python3 $INSTALL_BIN --version\n  Log: $LOG_FILE"
 fi
 
 # ─────────────────────────────────────────────
-step "5/5  Summary"
+# SUMMARY
 # ─────────────────────────────────────────────
 
-if [ ${#INSTALLED[@]} -gt 0 ]; then
-  echo -e "  ${GREEN}Packages installed:${RESET}"
-  for pkg in "${INSTALLED[@]}"; do detail "$pkg"; done
-  echo
-fi
+echo -e "\n${BOLD}Summary${RESET}\n$(printf '─%.0s' {1..46})"
 
-if [ ${#FAILED[@]} -gt 0 ]; then
-  echo -e "  ${RED}Packages that failed to install:${RESET}"
-  for pkg in "${FAILED[@]}"; do detail "✗ $pkg"; done
-  echo
-fi
+[ ${#INSTALLED[@]} -gt 0 ] && {
+  echo -e "  ${GREEN}Newly installed:${RESET}"
+  for p in "${INSTALLED[@]}"; do detail "  + $p"; done; echo; }
 
-if [ ${#WARNED[@]} -gt 0 ]; then
+[ ${#FAILED[@]} -gt 0 ] && {
+  echo -e "  ${RED}Failed to install:${RESET}"
+  for p in "${FAILED[@]}"; do detail "  ✗ $p"; done; echo; }
+
+[ ${#WARNED[@]} -gt 0 ] && {
   echo -e "  ${YELLOW}Warnings:${RESET}"
-  for w in "${WARNED[@]}"; do detail "! $w"; done
-  echo
-fi
+  for w in "${WARNED[@]}"; do detail "  ! $w"; done; echo; }
 
-echo -e "  ${DIM}Full install log: $LOG_FILE${RESET}"
+[ -n "$REMOTE_SHA" ] && detail "Installed commit: ${REMOTE_SHA:0:12}  ($REPO_URL)"
+echo -e "  ${DIM}Full log: $LOG_FILE${RESET}"
 
-# Final verdict
 if [ ${#FAILED[@]} -gt 0 ]; then
   echo -e "\n  ${YELLOW}${BOLD}sorc installed with warnings.${RESET} Some features may be limited.\n"
+elif [ "$IS_UPDATE" = "1" ]; then
+  echo -e "\n  ${GREEN}${BOLD}sorc updated successfully.${RESET}\n"
 else
   echo -e "\n  ${GREEN}${BOLD}sorc installed successfully.${RESET}\n"
 fi
@@ -310,4 +387,4 @@ echo -e "  Get started:"
 echo -e "    ${BLUE}sorc doctor${RESET}          — verify your environment"
 echo -e "    ${BLUE}sorc create <name>${RESET}    — create your first pod"
 echo -e "    ${BLUE}sorc list${RESET}             — list all pods"
-echo
+echo -e "\n  Re-run this script anytime to update sorc.\n"

@@ -228,43 +228,104 @@ def get_backend(manifest: dict):
 # SCRIPT GENERATION
 # ─────────────────────────────────────────────
 
+def source_type(manifest: dict) -> str:
+    """Return 'remote', 'local', or 'none' based on the source block."""
+    src = manifest.get("source", {})
+    if src.get("git_repo"):   return "remote"
+    if src.get("local_path"): return "local"
+    return "none"
+
+
+def resolve_working_dir(manifest: dict, pd: Path) -> str:
+    """Return the effective working directory for launch.sh."""
+    run_cfg = manifest.get("run", {})
+    explicit = run_cfg.get("working_dir", "")
+    if explicit:
+        return explicit
+    stype = source_type(manifest)
+    if stype == "remote":
+        return str(pd / "repo")
+    if stype == "local":
+        return manifest["source"]["local_path"]
+    return str(pd)
+
+
 def gen_preflight(manifest: dict, pd: Path) -> str:
-    src   = manifest.get("source", {})
-    repo  = src.get("git_repo", "")
-    branch = src.get("branch", "main")
-    auto_pull = src.get("auto_pull", False)
+    src        = manifest.get("source", {})
     build_cmds = manifest.get("build", {}).get("pre_start_scripts", [])
+    stype      = source_type(manifest)
+    lines      = ["#!/bin/bash", "set -e", ""]
 
-    lines = ["#!/bin/bash", "set -e", f"cd {pd}", ""]
-
-    if repo:
+    if stype == "remote":
+        repo      = src["git_repo"]
+        branch    = src.get("branch", "main")
+        auto_pull = src.get("auto_pull", False)
         lines += [
+            f'# ── remote git source ──',
             f'if [ ! -d "{pd}/repo/.git" ]; then',
             f'  echo "[sorc] Cloning {repo}"',
             f'  git clone --branch {branch} {repo} {pd}/repo',
-            "else",
+            f'else',
         ]
         if auto_pull:
             lines += [
                 f'  echo "[sorc] Pulling latest ({branch})"',
-                f"  git -C {pd}/repo pull origin {branch}",
+                f'  git -C {pd}/repo pull origin {branch}',
             ]
+        else:
+            lines += [f'  echo "[sorc] auto_pull disabled — skipping pull"']
         lines += ["fi", ""]
+
+    elif stype == "local":
+        local_path  = src["local_path"]
+        auto_sync   = src.get("auto_sync", False)
+        is_git_hint = src.get("is_git", True)   # hint: treat as git repo?
+        lines += [
+            f'# ── local path source ──',
+            f'if [ ! -d "{local_path}" ]; then',
+            f'  echo "[sorc] ERROR: local_path not found: {local_path}" >&2',
+            f'  exit 1',
+            f'fi',
+            f'echo "[sorc] Using local path: {local_path}"',
+            "",
+        ]
+        if auto_sync and is_git_hint:
+            lines += [
+                f'if [ -d "{local_path}/.git" ]; then',
+                f'  echo "[sorc] auto_sync: pulling local git repo"',
+                f'  git -C {local_path} pull',
+                f'else',
+                f'  echo "[sorc] auto_sync enabled but {local_path} is not a git repo — skipping"',
+                f'fi',
+                "",
+            ]
+
+    else:  # none
+        lines += [
+            "# ── no source configured — nothing to clone or sync ──",
+            "",
+        ]
 
     for cmd in build_cmds:
         safe = " ".join(str(c) for c in cmd)
-        lines += [f'echo "[sorc] Build step: {safe}"', safe, ""]
+        wd   = resolve_working_dir(manifest, pd)
+        lines += [
+            f'echo "[sorc] Build step: {safe}"',
+            f'cd {wd}',
+            safe,
+            "",
+        ]
 
     lines += ['echo "[sorc] Preflight complete."']
     return "\n".join(lines) + "\n"
 
 
 def gen_launch(manifest: dict, pd: Path, backend) -> str:
-    run_cfg = manifest.get("run", {})
-    cmd_list = run_cfg.get("command", [])
-    shell_cmd = run_cfg.get("shell_command", "")
-    working_dir = run_cfg.get("working_dir", str(pd))
-    pod_name = manifest["name"]
+    run_cfg     = manifest.get("run", {})
+    cmd_list    = run_cfg.get("command", [])
+    shell_cmd   = run_cfg.get("shell_command", "")
+    working_dir = resolve_working_dir(manifest, pd)
+    pod_name    = manifest["name"]
 
     if shell_cmd:
         exec_line = shell_cmd
@@ -274,13 +335,13 @@ def gen_launch(manifest: dict, pd: Path, backend) -> str:
         exec_line = "echo '[sorc] No command configured.'"
 
     session = backend.session_name(pod_name)
-    backend_bin = "screen" if isinstance(backend, ScreenBackend) else "tmux"
 
     lines = [
         "#!/bin/bash",
-        f"cd {working_dir}",
+        f'cd "{working_dir}"',
         f'[ -f "{pd}/.env" ] && set -a && source "{pd}/.env" && set +a',
         "",
+        f'echo "[sorc] Working dir: {working_dir}"',
         f'echo "[sorc] Starting session: {session}"',
         f"{exec_line}",
     ]
@@ -426,11 +487,37 @@ def cmd_create(args):
         val = input(f"  {prompt} [{default}]: ").strip()
         return val if val else default
 
-    git_repo    = ask("Git repo URL (optional)", "")
-    branch      = ask("Branch", "main") if git_repo else "main"
-    auto_pull   = ask("Auto-pull on start?", "y").lower() == "y" if git_repo else False
+    # ── source type wizard ──
+    src_type = ask("Source type  (remote / local / none)", "none")
+    source   = {}
+
+    if src_type == "remote":
+        git_repo  = ask("Git repo URL", "https://github.com/user/repo.git")
+        branch    = ask("Branch", "main")
+        auto_pull = ask("Auto-pull on start?", "y").lower() == "y"
+        source    = {"git_repo": git_repo, "branch": branch, "auto_pull": auto_pull}
+
+    elif src_type == "local":
+        local_path = ask("Local repo/directory path", f"/home/{os.getlogin()}/projects/{name}")
+        auto_sync  = ask("Auto-sync (git pull) on start?", "n").lower() == "y"
+        source     = {"local_path": local_path, "auto_sync": auto_sync, "is_git": True}
+        # Validate path exists
+        if not Path(local_path).exists():
+            warn(f"Path '{local_path}' does not exist yet — make sure it exists before starting.")
+
+    else:  # none
+        info("No source — sorc will manage the process only.")
+
+    # ── default working dir depends on source type ──
+    if src_type == "remote":
+        default_wd = f"~/.sorc/pods/{name}/repo"
+    elif src_type == "local":
+        default_wd = source.get("local_path", f"~/.sorc/pods/{name}")
+    else:
+        default_wd = f"~/.sorc/pods/{name}"
+
     command_str = ask("Run command", "python3 main.py")
-    working_dir = ask("Working directory", f"~/.sorc/pods/{name}")
+    working_dir = ask("Working directory", default_wd)
     max_mem     = ask("Max memory", "1G")
     restart_sec = ask("Restart delay (sec)", "10")
 
@@ -452,7 +539,7 @@ def cmd_create(args):
             "tags": [],
             "created_at": datetime.now().isoformat()
         },
-        "source": {"git_repo": git_repo, "branch": branch, "auto_pull": auto_pull},
+        "source": source,
         "runtime": {"type": "process"},
         "terminal": {"backend": ask("Terminal backend (screen/tmux)", "screen")},
         "build": {"pre_start_scripts": []},
@@ -484,8 +571,8 @@ def cmd_create(args):
     if dry:
         header("─── DRY RUN — nothing written ───")
         print("\n[pod.json]\n" + json.dumps(manifest, indent=2))
-        print("\n[launch.sh]\n" + launch)
         print("\n[preflight.sh]\n" + pre)
+        print("\n[launch.sh]\n" + launch)
         print("\n[shutdown.sh]\n" + shut)
         print(f"\n[{unit_path(name)}]\n" + unit)
         return
@@ -503,7 +590,6 @@ def cmd_create(args):
     gitignore = pd / ".gitignore"
     gitignore.write_text(".env\n")
 
-    # Write systemd unit
     try:
         unit_path(name).write_text(unit)
         daemon_reload()
@@ -513,7 +599,7 @@ def cmd_create(args):
         warn(f"Unit file preview saved to {pd}/sorc.service")
         (pd / "sorc.service").write_text(unit)
 
-    sorc_log(name, "create")
+    sorc_log(name, "create", {"source_type": src_type})
     ok(f"Pod '{name}' created at {pd}")
     info(f"Next: sorc start {name}")
 

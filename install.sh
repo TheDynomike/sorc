@@ -208,8 +208,8 @@ else
 fi
 
 # Determine mode
-if [ -z "$LOCAL_SHA" ] && ! command -v sorc &>/dev/null; then
-  info "No existing installation found — fresh install"
+if ! command -v sorc &>/dev/null && [ ! -f "$INSTALL_BIN" ]; then
+  info "sorc binary missing (not found in PATH or $INSTALL_BIN) — forcing install"
   IS_UPDATE=0
 elif [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
   ok "Already up to date (${REMOTE_SHA:0:12})"

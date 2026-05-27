@@ -316,8 +316,7 @@ if [ "$IS_UPDATE" = "1" ] && [ -f "$INSTALL_BIN" ]; then
 fi
 
 # Install
-chmod +x "$TMP_PY"
-if sudo cp "$TMP_PY" "$INSTALL_BIN" 2>>"$LOG_FILE" && sudo chmod +x "$INSTALL_BIN"; then
+if sudo cp "$TMP_PY" "$INSTALL_BIN" 2>>"$LOG_FILE" && sudo chmod 755 "$INSTALL_BIN"; then
   ok "Installed → $INSTALL_BIN"
   detail "$(ls -lh "$INSTALL_BIN")"
 else

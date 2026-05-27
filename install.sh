@@ -341,12 +341,6 @@ mkdir -p "$SORC_DIR"/{pods,logs,snapshots,templates}
 detail "pods/ logs/ snapshots/ templates/ ready"
 ok "~/.sorc ready"
 
-# Cache the installed SHA
-if [ -n "$REMOTE_SHA" ]; then
-  save_local_sha "$REMOTE_SHA"
-  detail "Cached SHA: ${REMOTE_SHA:0:12} → $SORC_DIR/.installed_sha"
-fi
-
 # Smoke test
 info "Running smoke test..."
 if SMOKE=$("$INSTALL_BIN" --version 2>&1); then
@@ -359,6 +353,12 @@ else
     die "Update rolled back. Previous version restored.\n  Log: $LOG_FILE"
   fi
   die "Installed binary failed smoke test.\n  Try: python3 $INSTALL_BIN --version\n  Log: $LOG_FILE"
+fi
+
+# Cache the installed SHA
+if [ -n "$REMOTE_SHA" ]; then
+  save_local_sha "$REMOTE_SHA"
+  detail "Cached SHA: ${REMOTE_SHA:0:12} → $SORC_DIR/.installed_sha"
 fi
 
 # ─────────────────────────────────────────────

@@ -174,13 +174,21 @@ _log "Started. PM=$PM  OS=$(uname -sr)  USER=$(whoami)"
 step "1/5  Preflight"
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# Root Check
+# ─────────────────────────────────────────────
 [[ "$(uname)" != "Linux" ]] && die "sorc requires Linux + systemd. Detected: $(uname)"
 ok "Linux $(uname -r)"
 
 command -v systemctl &>/dev/null || die "systemd not found. sorc is systemd-only."
 ok "systemd — $(systemctl --version | head -1)"
 
-[ "$EUID" -eq 0 ] && warn "Running as root — pods will run as root. A dedicated user is safer."
+if [ "$EUID" -eq 0 ]; then
+  echo -e "\n  ${RED}${BOLD}✗ Fatal:${RESET} Please do not run this script as root or with sudo." >&2
+  echo -e "  The script will automatically request sudo privileges only when necessary" >&2
+  echo -e "  (e.g., for installing dependencies or moving the binary to /usr/local/bin).\n" >&2
+  exit 1
+fi
 
 command -v sudo &>/dev/null || die "sudo is required."
 ok "sudo available"

@@ -19,7 +19,7 @@ You can install `sorc` globally on your Linux machine using our automated instal
 Simply run the following command in your terminal:
 
 ```bash
-curl -fsSL [https://raw.githubusercontent.com/TheDynomike/sorc/main/install.sh](https://raw.githubusercontent.com/TheDynomike/sorc/main/install.sh) | bash
+curl -fsSL https://raw.githubusercontent.com/TheDynomike/sorc/main/install.sh | bash
 ```
 Note: Depending on your system permissions, the installation script may prompt you for sudo access to place the executable in your system's PATH (e.g., /usr/local/bin).
 

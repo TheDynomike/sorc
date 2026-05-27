@@ -215,19 +215,38 @@ else
   REMOTE_SHA=""
 fi
 
-# Determine mode
-if ! command -v sorc &>/dev/null && [ ! -f "$INSTALL_BIN" ]; then
-  info "sorc binary missing (not found in PATH or $INSTALL_BIN) — forcing install"
+# ─────────────────────────────────────────────
+# Determine mode & Health Check
+# ─────────────────────────────────────────────
+SORC_HEALTHY=0
+
+# 1. Does the binary exist in PATH or the install dir?
+if command -v sorc &>/dev/null || [ -f "$INSTALL_BIN" ]; then
+  # 2. Does it actually run for the current user?
+  if "$INSTALL_BIN" --version >/dev/null 2>&1 || python3 "$INSTALL_BIN" --version >/dev/null 2>&1; then
+    SORC_HEALTHY=1
+  else
+    warn "Existing sorc binary is broken or unreadable. Forcing reinstall."
+  fi
+fi
+
+# 3. Route the logic based on health and SHAs
+if [ "$SORC_HEALTHY" -eq 0 ]; then
+  info "sorc is missing or broken — forcing install"
   IS_UPDATE=0
+  LOCAL_SHA="" # Clear this in memory so we bypass the "Already up to date" check
+
 elif [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
   ok "Already up to date (${REMOTE_SHA:0:12})"
   echo -e "\n  ${GREEN}${BOLD}sorc is current. Nothing to do.${RESET}"
   echo -e "  Run ${BLUE}sorc doctor${RESET} to verify your environment.\n"
   exit 0
-elif [ -n "$LOCAL_SHA" ] || command -v sorc &>/dev/null; then
+
+elif [ -n "$LOCAL_SHA" ]; then
   CURRENT_VER=$(sorc --version 2>/dev/null || echo "unknown")
   info "Update available — current: $CURRENT_VER  remote: ${REMOTE_SHA:0:12}"
   IS_UPDATE=1
+
 else
   info "Installing sorc for the first time"
   IS_UPDATE=0
